@@ -1,0 +1,47 @@
+name: Frontend Docker Deployment
+
+on:
+  push:
+    branches:
+      - main   # Trigger on push to main branch
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Copy project to EC2
+      - name: Copy project files to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "."
+          target: "/home/${{ secrets.SERVER_USER }}/super-admin"
+
+      # Step 3: Build and run Docker container on EC2
+      - name: Build and run Docker container on EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.SERVER_USER }}/super-admin
+
+            # Stop and remove old container
+            docker stop super-admin || true
+            docker rm super-admin || true
+
+            # Build new Docker image
+            docker build -t super-admin:latest .
+
+            # Run container
+            docker run -d --name super-admin -p 3000:3000 super-admin:latest
+
+            echo "✅ Deployment complete!"
