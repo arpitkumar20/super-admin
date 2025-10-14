@@ -6,7 +6,7 @@ import { Layout } from './components/layout/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ClientsPage } from './pages/ClientsPage';
-import { OnboardingPage } from './pages/OnboardingPage';
+import  OnboardingPage  from './pages/OnboardingPage';
 import { BillingPage } from './pages/BillingPage';
 import { ToursPage } from './pages/ToursPage';
 import { SupportPage } from './pages/SupportPage';
@@ -16,6 +16,7 @@ import { RolesPage } from './pages/RolesPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
+  console.log('ProtectedRoute: Checking isAuthenticated =', isAuthenticated); // Debugging log
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 };
 

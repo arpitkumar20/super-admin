@@ -1,261 +1,280 @@
 // src/services/api.ts
-import type { 
-  Client, 
-  Ticket, 
-  Tour, 
-  Scene, 
-  Hotspot, 
-  Invoice, 
-  AnalyticsData 
-} from '../types';
-import { mockClients, mockTickets, mockInvoices, mockAnalytics } from '../data/mockData';
-import { v4 as uuidv4 } from 'uuid';
+import { Client } from "../types";
 
-// -----------------------------------------------------------------------------
-// Automatically assign 5 images per client from public/images
-// -----------------------------------------------------------------------------
-const officeImages = Array.from({ length: 16 }, (_, i) => `/images/office-${i + 1}.jpg`);
+export const BASE_URL = "http://34.238.181.131:5600";
 
-// -----------------------------------------------------------------------------
-// Internal Mock Tours Data
-// -----------------------------------------------------------------------------
-const tours: Tour[] = mockClients.map((client, idx) => {
-  const startImage = idx * 5; // each client gets 5 images
-  const scenes: Scene[] = [];
-
-  for (let i = 0; i < 5; i++) {
-    const imageIndex = startImage + i;
-    if (imageIndex >= officeImages.length) break;
-    scenes.push({
-      id: uuidv4(),
-      tourId: `tour-${client.id}`,
-      title: `Scene ${i + 1}`,
-      imageUrl: officeImages[imageIndex],
-      uploadDate: new Date().toISOString(),
-      size: 1.0,
-      bandwidth: 100,
-      hotspots: [],
-    });
-  }
-
-  return {
-    id: `tour-${client.id}`,
-    clientId: client.id,
-    clientName: client.name,
-    title: `${client.name} 360° Tour`,
-    status: 'approved',
-    uploadDate: new Date().toISOString(),
-    size: scenes.length,
-    bandwidth: scenes.length * 100,
-    scenes,
-  };
-});
-
-// -----------------------------------------------------------------------------
-// Helper: simulate delay
-// -----------------------------------------------------------------------------
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// -----------------------------------------------------------------------------
-// CLIENT SUBSCRIPTIONS
-// -----------------------------------------------------------------------------
-interface Subscription {
-  clientId: string;
-  plan: string;
+// Define a specific type for Zoho config
+interface ZohoConfig {
+  client_id: string;
+  client_secret: string;
+  refresh_token: string;
 }
-const clientSubscriptions: Subscription[] = mockClients.map(c => ({
-  clientId: c.id,
-  plan: c.currentPlan || 'Free',
-}));
 
-// -----------------------------------------------------------------------------
-// API Implementation
-// -----------------------------------------------------------------------------
 export const api = {
-  // ---------------- CLIENT ----------------
-  async getClients(): Promise<Client[]> {
-    await delay(500);
-    return JSON.parse(JSON.stringify(mockClients));
-  },
+  // ✅ Fetch all clients
+  getClients: async (): Promise<Client[]> => {
+    try {
+      const res = await fetch(`${BASE_URL}/client`);
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-  async updateClientStatus(id: string, status: Client['status']): Promise<void> {
-    await delay(300);
-    const client = mockClients.find(c => c.id === id);
-    if (client) client.status = status;
-  },
+      const json = await res.json();
+      console.log("Raw backend response for /client:", json);
 
-  async generateApiKey(clientId: string): Promise<string> {
-    await delay(500);
-    const apiKey = `${clientId}_sk_${Math.random().toString(36).substring(2, 15)}`;
-    const client = mockClients.find(c => c.id === clientId);
-    if (client) client.apiKey = apiKey;
-    return apiKey;
-  },
-
-  async addClient(newClient: Omit<Client, 'id' | 'apiKey' | 'currentUsage'>): Promise<Client> {
-    await delay(400);
-    const client: Client = {
-      ...newClient,
-      id: uuidv4(),
-      apiKey: `${newClient.name.toLowerCase().replace(/\s+/g, '-')}_sk_${Math.random().toString(36).substring(2, 15)}`,
-      currentUsage: 0,
-      usageLimit: newClient.usageLimit ?? 10000,
-      createdAt: new Date().toISOString(),
-    };
-    mockClients.push(client);
-    clientSubscriptions.push({ clientId: client.id, plan: 'Free' });
-    return JSON.parse(JSON.stringify(client));
-  },
-
-  // ---------------- TICKET ----------------
-  async getTickets(): Promise<Ticket[]> {
-    await delay(500);
-    return JSON.parse(JSON.stringify(mockTickets));
-  },
-
-  async updateTicketStatus(id: string, status: Ticket['status']): Promise<void> {
-    await delay(300);
-    const ticket = mockTickets.find(t => t.id === id);
-    if (ticket) {
-      ticket.status = status;
-      ticket.updatedAt = new Date().toISOString();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (json.data || json || []).map((client: any) => ({
+        id: client.id,
+        name: client.full_name,
+        email: client.email,
+        phone: client.phone,
+        address: client.address,
+        notes: client.notes,
+        connector: client.connector_type ?? client.connector ?? null,
+        has_connector:
+          typeof client.has_connector === "boolean"
+            ? client.has_connector
+            : Boolean(client.has_connector),
+        documents: client.client_documents || [],
+        logo: client.logo,
+        status: client.status,
+        urls: client.url ? [client.url] : [],
+        clientRef: client.client_ref,
+        created_at: client.created_at,
+        updated_at: client.updated_at,
+        config: client.config ?? null,
+      }));
+    } catch (err) {
+      console.error("API getClients error:", err);
+      throw err;
     }
   },
 
-  async createTicket(newTicket: Omit<Ticket, 'id' | 'createdAt' | 'updatedAt'>): Promise<Ticket> {
-    await delay(400);
-    const ticket: Ticket = {
-      ...newTicket,
-      id: `tkt_${Math.random().toString(36).substring(2, 9)}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    mockTickets.push(ticket);
-    return JSON.parse(JSON.stringify(ticket));
-  },
-  async assignTicket(ticketId: string, assignedTo: string): Promise<void> {
-  await delay(200); // simulate async call
-  const ticket = mockTickets.find(t => t.id === ticketId);
-  if (!ticket) throw new Error('Ticket not found');
-  ticket.assignedTo = assignedTo; // make sure assignedTo in Ticket type is string | undefined
-},
-
-  // ---------------- TOUR ----------------
-  async getTours(): Promise<Tour[]> {
-    await delay(300);
-    return JSON.parse(JSON.stringify(tours));
-  },
-
-  async getTourById(tourId: string): Promise<Tour | undefined> {
-    await delay(200);
-    return JSON.parse(JSON.stringify(tours.find(t => t.id === tourId)));
-  },
-
-  async createScene(tourId: string, scene: Partial<Scene>): Promise<Scene> {
-    await delay(200);
-    const newScene: Scene = {
-      id: uuidv4(),
-      tourId,
-      title: scene.title || 'Untitled Scene',
-      imageUrl: scene.imageUrl || '',
-      uploadDate: new Date().toISOString(),
-      size: scene.size || 0,
-      bandwidth: scene.bandwidth || 0,
-      hotspots: [],
-    };
-    const t = tours.find(x => x.id === tourId);
-    if (!t) throw new Error('Tour not found');
-    t.scenes.push(newScene);
-    return JSON.parse(JSON.stringify(newScene));
-  },
-
-  async createHotspot(hs: Partial<Hotspot>): Promise<Hotspot> {
-    await delay(150);
-    const newHs: Hotspot = {
-      id: uuidv4(),
-      sceneId: hs.sceneId!,
-      yaw: hs.yaw ?? 0,
-      pitch: hs.pitch ?? 0,
-      title: hs.title || '',
-      description: hs.description || '',
-      targetSceneId: hs.targetSceneId ?? null,
-    };
-    const scene = tours.flatMap(t => t.scenes).find(s => s.id === newHs.sceneId);
-    if (!scene) throw new Error('Scene not found');
-    scene.hotspots.push(newHs);
-    return JSON.parse(JSON.stringify(newHs));
-  },
-
-  async deleteHotspot(hotspotId: string): Promise<void> {
-    await delay(120);
-    for (const t of tours) {
-      for (const s of t.scenes) {
-        const idx = s.hotspots.findIndex(h => h.id === hotspotId);
-        if (idx >= 0) {
-          s.hotspots.splice(idx, 1);
-          return;
-        }
+    // Update only the logo for a client (partial update)
+    updateClientLogo: async (clientId: string, logo: File): Promise<{ logo: string }> => {
+      const formData = new FormData();
+      formData.append("id", clientId);
+      formData.append("logo", logo);
+      const res = await fetch(`${BASE_URL}/client/${clientId}/logo`, {
+        method: "PUT",
+        headers: { accept: "application/json" },
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        console.error("Backend updateClientLogo error:", err);
+        throw new Error("Failed to update client logo");
       }
+      return res.json();
+    },
+    // Usage example in your component:
+    // await api.updateClientLogo(clientId, logoFile);
+  // ✅ Fetch single client by ID
+  getClientById: async (id: string): Promise<Client> => {
+    const res = await fetch(`${BASE_URL}/client/${id}`);
+    if (!res.ok) throw new Error(`Failed to fetch client with ID ${id}`);
+    return res.json();
+  },
+
+  // ✅ Create new client (multipart/form-data)
+  createClient: async (client: Client): Promise<Client> => {
+    const formData = new FormData();
+
+    formData.append("id", client.id || "");
+    formData.append("full_name", client.name || "");
+    formData.append("address", client.address || "");
+    formData.append("client_ref", client.clientRef || "");
+    formData.append(
+      "connector_type",
+      client.connector ? String(client.connector) : ""
+    );
+    formData.append("email", client.email || "");
+    formData.append("has_connector", String(client.has_connector || false));
+    formData.append("notes", client.notes || "");
+    formData.append("phone", client.phone || "");
+    formData.append("status", client.status || "pending");
+    formData.append(
+      "url",
+      client.urls && client.urls[0] ? client.urls[0] : ""
+    );
+
+    // ✅ Append logo (support File or string)
+    if (client.logo instanceof File) {
+      formData.append("logo", client.logo);
+    } else if (typeof client.logo === "string" && client.logo.trim() !== "") {
+      formData.append("logo", client.logo);
     }
-  },
 
-  async approveTour(id: string): Promise<void> {
-    await delay(300);
-    const tour = tours.find(t => t.id === id);
-    if (tour) tour.status = 'approved';
-  },
-
-  async rejectTour(id: string): Promise<void> {
-    await delay(300);
-    const tour = tours.find(t => t.id === id);
-    if (tour) tour.status = 'rejected';
-  },
-
-  // ---------------- CLIENT SUBSCRIPTIONS ----------------
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async getClientSubscriptions(): Promise<any[]> {
-    await delay(400);
-    return mockClients.map(c => ({
-      ...c,
-      currentPlan: clientSubscriptions.find(s => s.clientId === c.id)?.plan || 'Free',
-    }));
-  },
-
-  async assignPlan(clientId: string, plan: string): Promise<void> {
-    await delay(300);
-    const sub = clientSubscriptions.find(s => s.clientId === clientId);
-    if (sub) sub.plan = plan;
-    const client = mockClients.find(c => c.id === clientId);
-    if (client) client.currentPlan = plan;
-  },
-
-  async changePlan(clientId: string, plan: string): Promise<void> {
-    await delay(300);
-    const sub = clientSubscriptions.find(s => s.clientId === clientId);
-    if (sub) sub.plan = plan;
-    const client = mockClients.find(c => c.id === clientId);
-    if (client) client.currentPlan = plan;
-  },
-
-  async cancelSubscription(clientId: string): Promise<void> {
-    await delay(300);
-    const sub = clientSubscriptions.find(s => s.clientId === clientId);
-    if (sub) sub.plan = 'Free';
-    const client = mockClients.find(c => c.id === clientId);
-    if (client) {
-      client.currentPlan = 'Free';
-      client.status = 'inactive';
+    // ✅ Append documents (support File or string)
+    if (client.documents && client.documents.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client.documents.forEach((doc: any) => {
+        if (doc instanceof File) {
+          formData.append("documents", doc);
+        } else if (doc.file instanceof File) {
+          formData.append("documents", doc.file);
+        } else if (typeof doc === "string") {
+          formData.append("documents", doc);
+        } else {
+          console.warn("Skipping invalid document entry:", doc);
+        }
+      });
     }
+
+    // ✅ Send config as JSON string
+    if (client.config) {
+      formData.append("config", JSON.stringify(client.config));
+    }
+
+    const res = await fetch(`${BASE_URL}/client/onboard`, {
+      method: "POST",
+      headers: { accept: "application/json" },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Backend createClient error:", err);
+      throw new Error("Failed to create client");
+    }
+
+    const responseData = await res.json();
+
+    return {
+      id: responseData.data.id,
+      name: responseData.data.full_name,
+      address: responseData.data.address,
+      email: responseData.data.email,
+      phone: responseData.data.phone,
+      urls: responseData.data.url ? [responseData.data.url] : [],
+      logo: responseData.data.logo,
+      clientRef: responseData.data.client_ref,
+      notes: responseData.data.notes,
+      documents: responseData.data.client_documents || [],
+      status: responseData.data.status,
+      has_connector: responseData.data.has_connector,
+      connector: responseData.data.connector_type ?? null,
+      config: responseData.data.config ?? null,
+    };
   },
 
-  // ---------------- INVOICES & ANALYTICS ----------------
-  async getInvoices(): Promise<Invoice[]> {
-    await delay(500);
-    return JSON.parse(JSON.stringify(mockInvoices));
+  // ✅ Update existing client (multipart/form-data)
+  updateClient: async (client: Client): Promise<Client> => {
+    const formData = new FormData();
+
+    formData.append("id", client.id || "");
+    formData.append("full_name", client.name || "");
+    formData.append("address", client.address || "");
+    formData.append("client_ref", client.clientRef || "");
+    formData.append(
+      "connector_type",
+      client.connector ? String(client.connector) : ""
+    );
+    formData.append("email", client.email || "");
+    formData.append("has_connector", String(client.has_connector || false));
+    formData.append("notes", client.notes || "");
+    formData.append("phone", client.phone || "");
+    formData.append("status", client.status || "pending");
+    formData.append(
+      "url",
+      client.urls && client.urls[0] ? client.urls[0] : ""
+    );
+
+    // ✅ Logo handling
+    if (client.logo instanceof File) {
+      formData.append("logo", client.logo);
+    } else if (typeof client.logo === "string" && client.logo.trim() !== "") {
+      formData.append("logo", client.logo);
+    }
+
+    // ✅ Documents handling
+    if (client.documents && client.documents.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client.documents.forEach((doc: any) => {
+        if (doc instanceof File) {
+          formData.append("documents", doc);
+        } else if (doc.file instanceof File) {
+          formData.append("documents", doc.file);
+        } else if (typeof doc === "string") {
+          formData.append("documents", doc);
+        } else {
+          console.warn("Skipping invalid document entry:", doc);
+        }
+      });
+    }
+
+    // ✅ Config handling
+    if (client.config) {
+      formData.append("config", JSON.stringify(client.config));
+    }
+
+    const res = await fetch(`${BASE_URL}/client/${client.id}`, {
+      method: "PUT",
+      headers: { accept: "application/json" },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Backend updateClient error:", err);
+      throw new Error("Failed to update client");
+    }
+
+    const responseData = await res.json();
+
+    return {
+      id: responseData.data.id,
+      name: responseData.data.full_name,
+      address: responseData.data.address,
+      email: responseData.data.email,
+      phone: responseData.data.phone,
+      urls: responseData.data.url ? [responseData.data.url] : [],
+      logo: responseData.data.logo,
+      clientRef: responseData.data.client_ref,
+      notes: responseData.data.notes,
+      documents: responseData.data.client_documents || [],
+      status: responseData.data.status,
+      has_connector: responseData.data.has_connector,
+      connector: responseData.data.connector_type ?? null,
+      config: responseData.data.config ?? null,
+    };
   },
 
-  async getAnalytics(): Promise<AnalyticsData[]> {
-    await delay(500);
-    return JSON.parse(JSON.stringify(mockAnalytics));
+  // ✅ Delete client
+  deleteClient: async (id: string): Promise<void> => {
+    const res = await fetch(`${BASE_URL}/client/${id}`, {
+      method: "DELETE",
+      headers: { accept: "/" },
+    });
+    if (!res.ok) throw new Error(`Failed to delete client ${id}`);
+  },
+
+  // ✅ Onboard client connector
+  onboardClientConnector: async (
+    clientId: string,
+    connectorType: string,
+    config: ZohoConfig
+  ) => {
+    const formData = new FormData();
+    formData.append("client_id", clientId);
+    formData.append("connector_type", connectorType);
+
+    if (connectorType === "zoho") {
+      formData.append("config[client_id]", config.client_id);
+      formData.append("config[client_secret]", config.client_secret);
+      formData.append("config[refresh_token]", config.refresh_token);
+    }
+
+    const res = await fetch(`${BASE_URL}/client/onboard-connector`, {
+      method: "POST",
+      headers: { accept: "application/json" },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("Backend onboardClientConnector error:", err);
+      throw new Error("Failed to onboard client connector");
+    }
+
+    return res.json();
   },
 };

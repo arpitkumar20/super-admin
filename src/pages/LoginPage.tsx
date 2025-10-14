@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
@@ -12,10 +13,15 @@ export const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
-  }
+  // Navigate to dashboard if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('LoginPage: isAuthenticated is true, navigating to /dashboard');
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,11 +29,16 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const success = await login(email, password);
-      if (!success) {
+      const success = await login(email, password); // ✅ Use AuthContext login
+
+      if (success) {
+        console.log('Login success, navigating to dashboard...');
+        navigate('/dashboard');
+      } else {
         setError('Invalid email or password');
       }
     } catch (err) {
+      console.error('Login error:', err);
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);

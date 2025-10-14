@@ -1,56 +1,91 @@
-import React, { createContext, useContext, useState } from 'react';
-import type { User } from '../types';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface AuthContextType {
-  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  isAuthenticated: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [token, setToken] = useState<string | null>(() => {
+    const savedToken = localStorage.getItem('token');
+    return savedToken || null;
+  });
+
+  const isAuthenticated = !!token;
+
+  useEffect(() => {
+    console.log('AuthProvider: isAuthenticated =', isAuthenticated);
+  }, [isAuthenticated]);
+
+  // 🔐 Login logic
+  const login = async (email: string, password: string): Promise<boolean> => {
+    console.log('Attempting login with email:', email); // Debugging log
+
+    try {
+      const response = await fetch('http://34.238.181.131:5600/user/login', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        console.error('Login failed with status:', response.status, response.statusText);
+        return false;
+      }
+
+      const data = await response.json();
+      console.log('Login successful:', data);
+
+      if (data.success && data.data?.token) {
+        const token = data.data.token;
+
+        // 💾 Save token
+        localStorage.setItem('token', token);
+
+        setToken(token);
+        console.log('Login successful:', { token });
+        return true;
+      } else {
+        console.error('Login failed:', data.message);
+        return false;
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      alert('Failed to connect to the server. Please try again later.'); // User-friendly message
+      return false;
+    }
+  };
+
+  // 🚪 Logout logic
+  const logout = () => {
+    console.log('Logging out...');
+    localStorage.removeItem('token');
+    setToken(null);
+  };
+
+  const value: AuthContextType = {
+    token,
+    isAuthenticated,
+    login,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('user');
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Mock authentication - in real app, this would call an API
-    if (email === 'admin@nisaa.com' && password === 'admin123') {
-      const mockUser: User = {
-        id: '1',
-        name: 'Super Admin',
-        email: 'admin@nisaa.com',
-        role: 'super_admin',
-        avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=100&h=100&fit=crop'
-      };
-      setUser(mockUser);
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      return true;
-    }
-    return false;
-  };
-
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
-  };
-
-  const isAuthenticated = !!user;
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
+export { AuthContext };
