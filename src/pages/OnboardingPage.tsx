@@ -279,7 +279,10 @@ const OnboardingPage: React.FC = () => {
   };
 
   const saveClientChanges = async () => {
-    if (!selectedClient || !initialClientState) return;
+    if (!selectedClient || !selectedClient.id || !initialClientState) {
+      setNotification({ message: 'Cannot update: Missing client ID or required fields.', type: 'error' });
+      return;
+    }
 
     // Compare current state with initial state to find changed fields
     const changedFields = Object.keys(selectedClient).reduce((changes, key) => {
@@ -302,16 +305,23 @@ const OnboardingPage: React.FC = () => {
           changes[key] = newDocs;
         }
       } else if (key === 'connector') {
-        // Always send the current connector value if it changed, never send null unless explicitly removed
-        const connectorToSend = connectorData.type !== null ? connectorData.type : selectedClient.connector;
-        if (connectorToSend !== initialClientState.connector) {
-          changes[key] = connectorToSend;
+        if (selectedClient.connector !== initialClientState.connector) {
+          changes[key] = selectedClient.connector;
+        }
+      } else if (key === 'config') {
+        if (JSON.stringify(selectedClient.config) !== JSON.stringify(initialClientState.config)) {
+          changes[key] = selectedClient.config;
         }
       } else if (selectedClient[key] !== initialClientState[key]) {
         changes[key] = selectedClient[key];
       }
       return changes;
     }, {});
+
+    // Always send required fields
+    changedFields.full_name = selectedClient.name || '';
+    changedFields.address = selectedClient.address || '';
+    changedFields.url = Array.isArray(selectedClient.urls) ? (selectedClient.urls[0] || '') : (selectedClient.urls || '');
 
     if (Object.keys(changedFields).length === 0) {
       console.log('No changes detected.');
@@ -331,7 +341,7 @@ const OnboardingPage: React.FC = () => {
         } else if (key === 'logo' && value instanceof File) {
           formData.append('logo', value, value.name);
         } else {
-          formData.append(key, JSON.stringify(value));
+          formData.append(key, typeof value === 'object' ? JSON.stringify(value) : value);
         }
       });
 
@@ -788,7 +798,7 @@ const OnboardingPage: React.FC = () => {
                   } else if (typeof client.logo === "string" && client.logo.length > 0) {
                     // If it's a full URL already, use it
                     if (client.logo.startsWith("http") || client.logo.startsWith("data:")) {
-                      return <img src={client.logo} alt="Logo" className="h-12 w-12 rounded-full object-cover" />;
+                      return <img src={client.logo} alt="Logo" className="h-12 w-12 rounded-full object-contain" />;
                     } else {
                       // Prepend S3 base URL
                       return <img src={S3_BASE_URL + client.logo} alt="Logo" className="h-12 w-12 rounded-full object-cover" />;
