@@ -12,6 +12,7 @@ import { ToursPage } from './pages/ToursPage';
 import { SupportPage } from './pages/SupportPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { TemplatesPage } from './pages/TemplatesPage';
+// Dev-only preview page removed
 import { RolesPage } from './pages/RolesPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -120,6 +121,7 @@ const AppRoutes: React.FC = () => {
         }
       />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      {/* Dev utility removed */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

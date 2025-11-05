@@ -66,6 +66,13 @@ export interface Client {
   industry?: string;
   contactPerson?: string;
   currentPlan?: "Free" | "Premium" | "Enterprise";
+
+  // Optional fields used by ClientsPage and other UIs (safe defaults applied in api.getClients)
+  subscription?: "basic" | "premium" | "enterprise";
+  currentUsage?: number;
+  usageLimit?: number;
+  apiKey?: string;
+  website?: string;
 }
 
 // ------------------------------------
