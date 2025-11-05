@@ -3,9 +3,20 @@ import { Card, CardHeader, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
+import { Switch } from '../components/ui/Switch';
 import { api } from '../services/api';
+import { adminRazorpayService, AdminPaymentOptions } from '../services/adminRazorpay';
 import type { Invoice } from '../types';
-import { CreditCard, Download, Eye, Send, Settings, User, Trash2, Edit2 } from 'lucide-react';
+import { CreditCard, Download, Eye, Send, User, Trash2, CheckCircle, XCircle, Calendar, IndianRupee } from 'lucide-react';
+
+// Simple payment result interface
+interface PaymentResult {
+  success: boolean;
+  paymentId?: string;
+  orderId?: string;
+  signature?: string;
+  error?: string;
+}
 
 
 export const BillingPage: React.FC = () => {
@@ -34,17 +45,26 @@ export const BillingPage: React.FC = () => {
     }
   ]);
   const [loading, setLoading] = useState(true);
-  const [showRazorpayModal, setShowRazorpayModal] = useState(false);
   const [showAssignPlanModal, setShowAssignPlanModal] = useState(false);
   const [showChangePlanModal, setShowChangePlanModal] = useState(false);
-  const [showEditPlanModal, setShowEditPlanModal] = useState(false);
+
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAdminPaymentModal, setShowAdminPaymentModal] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedClient, setSelectedClient] = useState<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [selectedPlan, setSelectedPlan] = useState<string>('');
-  const [editingPlanIndex, setEditingPlanIndex] = useState<number>(-1);
-  const [newPrice, setNewPrice] = useState<number>(0);
-  const [newFeatures, setNewFeatures] = useState<string>('');
+
+
+  
+  // Admin payment states
+  const [adminPaymentData, setAdminPaymentData] = useState({
+    clientId: '',
+    plan: 'Pro',
+    durationMonths: 1
+  });
 
   // Mock data for clients (in real app, load from API)
   const mockClients = [
@@ -86,9 +106,32 @@ export const BillingPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [invoiceData, clientData] = await Promise.all([api.getInvoices(), api.getClientSubscriptions()]);
-      setInvoices(invoiceData || []);
-      setClients(clientData || mockClients);
+      // Load actual onboarded clients from API
+      const [invoiceData, onboardedClients] = await Promise.all([
+        api.getInvoices(), 
+        api.getClients() // Get actual onboarded clients
+      ]);
+      
+      setInvoices((invoiceData as Invoice[]) || mockInvoices);
+      
+      // Map onboarded clients to billing format with payment status
+      const clientsWithBilling = onboardedClients.map(client => ({
+        id: client.id,
+        name: client.name,
+        company: client.name, // Use name as company if company field not available
+        email: client.email,
+        phone: client.phone,
+        currentPlan: client.currentPlan || 'Free',
+        status: client.status === 'approved' ? 'active' : 'pending',
+        nextBilling: client.currentPlan && client.currentPlan !== 'Free' 
+          ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 days from now
+          : 'N/A',
+        paymentStatus: client.currentPlan === 'Free' ? 'paid' : 
+                      client.status === 'approved' ? 'paid' : 'pending',
+        lastPayment: client.status === 'approved' ? new Date().toISOString().split('T')[0] : null
+      }));
+      
+      setClients(clientsWithBilling);
     } catch (error) {
       console.error('Failed to load data:', error);
       setInvoices(mockInvoices);
@@ -125,13 +168,17 @@ export const BillingPage: React.FC = () => {
     }
   };
 
-  const changePlan = async (clientId: string, plan: string) => {
+  const changePlan = async (clientId: string, planName: string) => {
     try {
-      await api.changePlan(clientId, plan);
-      setClients(clients.map(c => c.id === clientId ? { ...c, currentPlan: plan } : c));
+      // Close the plan selection modal first
       setShowChangePlanModal(false);
+      
+      // Start payment process for the new plan
+      console.log(`🔄 Initiating plan change to ${planName} for client ${clientId}`);
+      await processClientPayment(planName, clientId);
+      
     } catch (error) {
-      console.error('Failed to change plan:', error);
+      console.error('Failed to initiate plan change:', error);
     }
   };
 
@@ -144,6 +191,276 @@ export const BillingPage: React.FC = () => {
     }
   };
 
+  // Simple payment processing placeholder
+  const processPayment = async (planName: string, amount: number) => {
+    if (!selectedClient) return;
+
+    setPaymentLoading(true);
+    setShowPaymentModal(true);
+    
+    try {
+      console.log('� Processing payment:', { planName, amount, clientId: selectedClient.id });
+      
+      // Simulate payment processing
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Simulate success for demo
+      const result: PaymentResult = {
+        success: true,
+        paymentId: `pay_${Date.now()}`,
+        orderId: `order_${Date.now()}`
+      };
+
+      setPaymentResult(result);
+      
+      if (result.success) {
+        // Update client plan on successful payment
+        setClients(clients.map(c => 
+          c.id === selectedClient.id 
+            ? { ...c, currentPlan: planName, status: 'active' } 
+            : c
+        ));
+        
+        // Close plan selection modals
+        setShowAssignPlanModal(false);
+        setShowChangePlanModal(false);
+      }
+      
+    } catch (error) {
+      console.error('Payment error:', error);
+      setPaymentResult({
+        success: false,
+        error: 'Payment failed. Please try again.'
+      });
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const closePaymentModal = () => {
+    setShowPaymentModal(false);
+    setPaymentResult(null);
+    setSelectedClient(null);
+  };
+
+  // Admin payment processing function
+  const processAdminPayment = async (clientId: string, plan: string, months: number) => {
+    try {
+      setPaymentLoading(true);
+      
+      // Find the client
+      const client = clients.find(c => c.id === clientId);
+      if (!client) {
+        throw new Error('Client not found');
+      }
+
+      // Get plan details
+      const selectedPlan = subscriptionPlans.find(p => p.name === plan);
+      if (!selectedPlan) {
+        throw new Error('Plan not found');
+      }
+
+      console.log(`🏦 Admin processing payment for ${client.name || client.company}`);
+
+      // Prepare payment options
+      const paymentOptions: AdminPaymentOptions = {
+        amount: selectedPlan.price,
+        currency: 'INR',
+        clientId: client.id,
+        clientName: client.name || client.company,
+        clientEmail: client.email || 'client@example.com',
+        clientPhone: client.phone || '9999999999',
+        plan: selectedPlan.name,
+        durationMonths: months
+      };
+
+      // Process payment through Razorpay
+      const result = await adminRazorpayService.processClientPayment(paymentOptions);
+
+      if (result.success) {
+        console.log('✅ Admin payment successful!', result);
+        
+        // Update client status
+        const updatedClients = clients.map(c => 
+          c.id === clientId 
+            ? { 
+                ...c, 
+                paymentStatus: 'paid' as const,
+                currentPlan: plan,
+                subscriptionEndDate: new Date(Date.now() + months * 30 * 24 * 60 * 60 * 1000).toISOString()
+              }
+            : c
+        );
+        setClients(updatedClients);
+
+        // Generate invoice
+        const newInvoice: Invoice = {
+          id: `INV-${Date.now()}`,
+          clientId: client.id,
+          clientName: client.name || client.company,
+          amount: selectedPlan.price * months,
+          status: 'paid' as const,
+          dueDate: new Date().toLocaleDateString(),
+          paidDate: new Date().toLocaleDateString()
+        };
+        setInvoices(prev => [newInvoice, ...prev]);
+
+        setPaymentResult({
+          success: true,
+          paymentId: result.paymentId,
+          orderId: result.orderId,
+          signature: result.signature
+        });
+
+        setShowPaymentModal(true);
+        setShowAdminPaymentModal(false);
+
+      } else {
+        console.error('❌ Admin payment failed:', result.error);
+        setPaymentResult({
+          success: false,
+          error: result.error || 'Payment failed'
+        });
+        setShowPaymentModal(true);
+      }
+
+    } catch (error) {
+      console.error('💥 Admin payment error:', error);
+      setPaymentResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Payment processing failed'
+      });
+      setShowPaymentModal(true);
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  // Handle plan assignment toggle
+  const togglePlanAssignment = (client: { id: string; name: string; currentPlan: string }, newPlan: string) => {
+    setClients(prevClients =>
+      prevClients.map(c =>
+        c.id === client.id
+          ? { ...c, currentPlan: newPlan }
+          : c
+      )
+    );
+    console.log(`Toggled ${client.name}'s plan to: ${newPlan}`);
+  };
+
+  // Process payment for specific client with their current plan
+  const processClientPayment = async (planType: string, clientId: string) => {
+    setLoading(true);
+    setPaymentResult(null);
+
+    try {
+      console.log(`� Processing payment for client: ${clientId}, plan: ${planType}`);
+      
+      // Get plan details based on planType
+      const selectedPlan = subscriptionPlans.find(plan => 
+        plan.name.toLowerCase() === planType.toLowerCase() || 
+        plan.name.toLowerCase().includes(planType.toLowerCase())
+      );
+
+      if (!selectedPlan) {
+        throw new Error(`Plan "${planType}" not found`);
+      }
+
+      // Find the client
+      const client = clients.find(c => c.id === clientId);
+      if (!client) {
+        throw new Error(`Client with ID "${clientId}" not found`);
+      }
+
+      console.log(`💰 Processing payment: ₹${selectedPlan.price} for ${selectedPlan.name} plan`);
+
+      // Simulate payment processing
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Simulate success
+      const result: PaymentResult = {
+        success: true,
+        paymentId: `pay_${Date.now()}`,
+        orderId: `order_${Date.now()}`
+      };
+
+      if (result.success) {
+        console.log('✅ Payment successful!', result);
+        
+        setPaymentResult({
+          success: true,
+          paymentId: result.paymentId,
+          orderId: result.orderId,
+          signature: result.signature,
+          error: undefined
+        });
+
+        // Update client payment status and plan
+        const updatedClients = clients.map(c => 
+          c.id === clientId 
+            ? { 
+                ...c, 
+                paymentStatus: 'paid' as const,
+                currentPlan: selectedPlan.name // Update to the new plan
+              }
+            : c
+        );
+        setClients(updatedClients);
+
+        // Update plans data - remove from old plan and add to new plan
+        const client = clients.find(c => c.id === clientId);
+        const oldPlanName = client?.currentPlan;
+        
+        const updatedPlans = subscriptionPlans.map(plan => {
+          if (plan.name === selectedPlan.name) {
+            // Add client to new plan
+            return { ...plan, clients: plan.clients + 1 };
+          } else if (plan.name === oldPlanName && oldPlanName !== selectedPlan.name) {
+            // Remove client from old plan
+            return { ...plan, clients: Math.max(0, plan.clients - 1) };
+          }
+          return plan;
+        });
+        setSubscriptionPlans(updatedPlans);
+
+        // Generate invoice
+        const newInvoice: Invoice = {
+          id: `INV-${Date.now()}`,
+          clientId: client.id,
+          clientName: client.name || client.company,
+          amount: selectedPlan.price,
+          status: 'paid' as const,
+          dueDate: new Date().toLocaleDateString(),
+          paidDate: new Date().toLocaleDateString()
+        };
+        setInvoices(prev => [newInvoice, ...prev]);
+
+        console.log(`📄 Plan changed from ${oldPlanName} to ${selectedPlan.name} for ${client.name || client.company}`);
+        console.log('📄 Invoice generated:', newInvoice.id);
+
+      } else {
+        console.log('❌ Payment failed:', result.error);
+        
+        setPaymentResult({
+          success: false,
+          error: result.error || 'Payment failed. Please try again.'
+        });
+      }
+    } catch (error) {
+      console.error('💥 Payment processing error:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred during payment processing';
+      
+      setPaymentResult({
+        success: false,
+        error: errorMessage
+      });
+    } finally {
+      setLoading(false);
+      console.log('🏁 Payment process completed');
+    }
+  };
+
   const getPlanVariant = (plan: string) => {
     switch (plan) {
       case 'Free': return 'default';
@@ -153,28 +470,7 @@ export const BillingPage: React.FC = () => {
     }
   };
 
-  const openEditPlanModal = (index: number) => {
-    setEditingPlanIndex(index);
-    setNewPrice(subscriptionPlans[index].price);
-    setNewFeatures(subscriptionPlans[index].features.join('\n'));
-    setShowEditPlanModal(true);
-  };
 
-  const savePlan = () => {
-    if (editingPlanIndex >= 0) {
-      const newFeaturesArray = newFeatures
-        .split('\n')
-        .map(f => f.trim())
-        .filter(f => f.length > 0);
-      setSubscriptionPlans(prev => prev.map((plan, i) => 
-        i === editingPlanIndex ? { ...plan, price: newPrice, features: newFeaturesArray } : plan
-      ));
-      // Optionally save to API
-      console.log(`Updated ${subscriptionPlans[editingPlanIndex].name} plan: price $${newPrice}, features:`, newFeaturesArray);
-    }
-    setShowEditPlanModal(false);
-    setEditingPlanIndex(-1);
-  };
 
   if (loading) {
     return (
@@ -188,13 +484,9 @@ export const BillingPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Billing & Payments</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Billing & Payments</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">Manage subscriptions, invoices, and payment processing</p>
         </div>
-        <Button onClick={() => setShowRazorpayModal(true)}>
-          <Settings className="h-4 w-4 mr-2" />
-          Configure Razorpay
-        </Button>
       </div>
 
       {/* Revenue Overview */}
@@ -245,22 +537,6 @@ export const BillingPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* Payment Gateway: Razorpay Integration */}
-      <Card>
-        <CardHeader>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Gateway Configuration</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Razorpay integration for secure payments</p>
-        </CardHeader>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-gray-600 dark:text-gray-400">Status: Integrated</p>
-            <Button variant="secondary" onClick={() => setShowRazorpayModal(true)}>
-              Edit Configuration
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Subscription Plans */}
       <Card>
         <CardHeader>
@@ -269,7 +545,7 @@ export const BillingPage: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {subscriptionPlans.map((plan, index) => (
+            {subscriptionPlans.map((plan) => (
               <div
                 key={plan.name}
                 className={`border rounded-lg p-6 flex flex-col h-full ${
@@ -304,9 +580,7 @@ export const BillingPage: React.FC = () => {
                   ))}
                 </ul>
 
-                <Button variant="secondary" className="mt-auto w-full" onClick={() => openEditPlanModal(index)}>
-                  Manage Plan
-                </Button>
+
               </div>
             ))}
           </div>
@@ -317,7 +591,7 @@ export const BillingPage: React.FC = () => {
       <Card>
         <CardHeader>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Client Subscriptions</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manage plans for individual clients</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manage plans for individual clients and process payments</p>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -329,6 +603,9 @@ export const BillingPage: React.FC = () => {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Current Plan
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Payment Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Next Billing
@@ -357,18 +634,64 @@ export const BillingPage: React.FC = () => {
                         {client.currentPlan}
                       </Badge>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <Badge variant={client.paymentStatus === 'paid' ? 'success' : 'warning'}>
+                        {client.paymentStatus === 'paid' ? 'Paid' : 'Pending'}
+                      </Badge>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                       {client.nextBilling}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end space-x-2">
-                        <Button size="sm" variant="ghost" onClick={() => { setSelectedClient(client); setShowAssignPlanModal(true); }}>
-                          Assign
+                        {client.paymentStatus === 'pending' && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => processClientPayment(client.currentPlan, client.id)}
+                            disabled={loading}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            {loading ? (
+                              <div className="flex items-center">
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                Processing...
+                              </div>
+                            ) : (
+                              <>
+                                <CreditCard className="h-4 w-4 mr-1" />
+                                Pay Now
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        
+                        {/* Admin Payment Button */}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setSelectedClient(client);
+                            setAdminPaymentData({
+                              clientId: client.id,
+                              plan: client.currentPlan,
+                              durationMonths: 1
+                            });
+                            setShowAdminPaymentModal(true);
+                          }}
+                          className="bg-green-600 hover:bg-green-700 text-white border-green-600"
+                        >
+                          <IndianRupee className="h-4 w-4 mr-1" />
+                          Admin Pay
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setSelectedClient(client); setShowChangePlanModal(true); }}>
-                          <Edit2 className="h-4 w-4 mr-1" />
-                          Change
-                        </Button>
+                        <div className="flex items-center space-x-2">
+                          <Switch 
+                            checked={client.currentPlan !== 'Free'}
+                            onChange={(checked) => togglePlanAssignment(client, checked ? 'Pro' : 'Free')}
+                            size="sm"
+                            label="Active"
+                          />
+                        </div>
                         <Button size="sm" variant="danger" onClick={() => cancelSubscription(client.id)}>
                           <Trash2 className="h-4 w-4 mr-1" />
                           Cancel
@@ -477,28 +800,6 @@ export const BillingPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Razorpay Configuration Modal */}
-      <Modal isOpen={showRazorpayModal} onClose={() => setShowRazorpayModal(false)} title="Razorpay Integration">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Key ID</label>
-            <input type="text" placeholder="rzp_test_xxx" className="w-full border px-3 py-2 rounded" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Key Secret</label>
-            <input type="password" placeholder="your_key_secret" className="w-full border px-3 py-2 rounded" />
-          </div>
-          <div className="flex space-x-4 pt-2">
-            <Button className="flex-1" onClick={() => { /* Save to API */ console.log('Razorpay configured'); setShowRazorpayModal(false); }}>
-              Save Configuration
-            </Button>
-            <Button variant="secondary" className="flex-1" onClick={() => setShowRazorpayModal(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
       {/* Assign Plan Modal */}
       <Modal isOpen={showAssignPlanModal} onClose={() => setShowAssignPlanModal(false)} title={`Assign Plan to ${selectedClient?.company}`}>
         <div className="space-y-4">
@@ -508,10 +809,20 @@ export const BillingPage: React.FC = () => {
               <Button
                 key={plan.name}
                 variant="secondary"
-                className="w-full justify-start"
-                onClick={() => { setSelectedPlan(plan.name); assignPlan(selectedClient?.id || '', plan.name); }}
+                className="w-full justify-between"
+                onClick={() => {
+                  setSelectedPlan(plan.name);
+                  if (plan.price > 0) {
+                    processPayment(plan.name, plan.price);
+                  } else {
+                    assignPlan(selectedClient?.id || '', plan.name);
+                  }
+                }}
               >
-                {plan.name} - ${plan.price}/mo
+                <span>{plan.name}</span>
+                <span className="font-semibold">
+                  {plan.price === 0 ? 'Free' : `$${plan.price}/mo`}
+                </span>
               </Button>
             ))}
           </div>
@@ -521,21 +832,61 @@ export const BillingPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Change Plan Modal */}
-      <Modal isOpen={showChangePlanModal} onClose={() => setShowChangePlanModal(false)} title={`Change Plan for ${selectedClient?.company}`}>
+      {/* Edit Plan Modal */}
+      <Modal isOpen={showChangePlanModal} onClose={() => setShowChangePlanModal(false)} title={`Edit Plan for ${selectedClient?.name || selectedClient?.company}`}>
         <div className="space-y-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400">Select a new plan:</p>
-          <div className="space-y-2">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Current Plan: <span className="font-semibold">{selectedClient?.currentPlan}</span>
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Select a new plan to upgrade or downgrade:</p>
+          <div className="space-y-3">
             {subscriptionPlans.map((plan) => (
-              <Button
+              <div
                 key={plan.name}
-                variant="secondary"
-                className="w-full justify-start"
-                onClick={() => { setSelectedPlan(plan.name); changePlan(selectedClient?.id || '', plan.name); }}
-                disabled={plan.name === selectedClient?.currentPlan}
+                className={`border rounded-lg p-4 ${
+                  plan.name === selectedClient?.currentPlan 
+                    ? 'border-gray-300 bg-gray-50 dark:bg-gray-700' 
+                    : 'border-gray-200 hover:border-blue-300 cursor-pointer'
+                }`}
               >
-                {plan.name} - ${plan.price}/mo {plan.name === selectedClient?.currentPlan && '(Current)'}
-              </Button>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-gray-900 dark:text-white">
+                    {plan.name}
+                    {plan.name === selectedClient?.currentPlan && (
+                      <span className="ml-2 text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded">Current</span>
+                    )}
+                  </h4>
+                  <span className="font-bold text-blue-600 dark:text-blue-400">
+                    ${plan.price}/month
+                  </span>
+                </div>
+                <ul className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                  {plan.features.slice(0, 3).map((feature, index) => (
+                    <li key={index} className="flex items-center">
+                      <svg className="h-3 w-3 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                {plan.name !== selectedClient?.currentPlan && (
+                  <Button
+                    variant={plan.price > 0 ? "primary" : "secondary"}
+                    className="w-full"
+                    onClick={() => changePlan(selectedClient?.id || '', plan.name)}
+                  >
+                    {plan.price > 0 ? (
+                      <>
+                        <CreditCard className="h-4 w-4 mr-2" />
+                        Select Plan & Pay ${plan.price}
+                      </>
+                    ) : (
+                      `Switch to ${plan.name}`
+                    )}
+                  </Button>
+                )}
+              </div>
             ))}
           </div>
           <Button variant="secondary" className="w-full" onClick={() => setShowChangePlanModal(false)}>
@@ -544,33 +895,148 @@ export const BillingPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Edit Plan Modal */}
-      <Modal isOpen={showEditPlanModal} onClose={() => setShowEditPlanModal(false)} title={`Edit Plan for ${subscriptionPlans[editingPlanIndex]?.name}`}>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Price ($/mo)</label>
-            <input 
-              type="number" 
-              value={newPrice} 
-              onChange={(e) => setNewPrice(Number(e.target.value))} 
-              className="w-full border px-3 py-2 rounded" 
-              min="0"
-            />
+
+
+      {/* Payment Processing Modal */}
+      <Modal isOpen={showPaymentModal} onClose={closePaymentModal} title="Payment Processing">
+        <div className="space-y-6 text-center">
+          {paymentLoading ? (
+            <div className="space-y-4">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <div>
+                <h3 className="text-lg font-semibold">Processing Payment...</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Please wait while we process your payment
+                </p>
+              </div>
+            </div>
+          ) : paymentResult ? (
+            <div className="space-y-4">
+              {paymentResult.success ? (
+                <div className="space-y-3">
+                  <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-300">
+                      Payment Successful!
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Your subscription has been activated successfully.
+                    </p>
+                    {paymentResult.paymentId && (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Payment ID: {paymentResult.paymentId}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <XCircle className="h-16 w-16 text-red-500 mx-auto" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-300">
+                      Payment Failed
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {paymentResult.error || 'Something went wrong. Please try again.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <Button onClick={closePaymentModal} className="w-full">
+                {paymentResult.success ? 'Continue' : 'Try Again'}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      {/* Admin Payment Modal */}
+      <Modal isOpen={showAdminPaymentModal} onClose={() => setShowAdminPaymentModal(false)} title={`Process Payment for ${selectedClient?.name || selectedClient?.company}`}>
+        <div className="space-y-6">
+          <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
+            <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Client Information</h4>
+            <div className="space-y-1 text-sm text-blue-700 dark:text-blue-300">
+              <p><strong>Name:</strong> {selectedClient?.name || selectedClient?.company}</p>
+              <p><strong>Email:</strong> {selectedClient?.email || 'Not provided'}</p>
+              <p><strong>Phone:</strong> {selectedClient?.phone || 'Not provided'}</p>
+              <p><strong>Current Plan:</strong> {selectedClient?.currentPlan}</p>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Features (one per line)</label>
-            <textarea 
-              value={newFeatures} 
-              onChange={(e) => setNewFeatures(e.target.value)} 
-              className="w-full border px-3 py-2 rounded h-32 resize-none" 
-              placeholder="Enter features, one per line"
-            />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <Calendar className="h-4 w-4 inline mr-1" />
+                Subscription Plan
+              </label>
+              <select
+                value={adminPaymentData.plan}
+                onChange={(e) => setAdminPaymentData({...adminPaymentData, plan: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                {subscriptionPlans.map((plan) => (
+                  <option key={plan.name} value={plan.name}>
+                    {plan.name} - ₹{plan.price}/month
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <Calendar className="h-4 w-4 inline mr-1" />
+                Duration (Months)
+              </label>
+              <select
+                value={adminPaymentData.durationMonths}
+                onChange={(e) => setAdminPaymentData({...adminPaymentData, durationMonths: parseInt(e.target.value)})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              >
+                {[1, 3, 6, 12].map((months) => (
+                  <option key={months} value={months}>
+                    {months} {months === 1 ? 'Month' : 'Months'}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="flex space-x-4 pt-2">
-            <Button className="flex-1" onClick={savePlan}>
-              Save Plan
+
+          <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total Amount:</span>
+              <span className="text-lg font-bold text-green-600 dark:text-green-400">
+                ₹{(subscriptionPlans.find(p => p.name === adminPaymentData.plan)?.price || 0) * adminPaymentData.durationMonths}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Payment will be processed through Razorpay gateway
+            </p>
+          </div>
+
+          <div className="flex space-x-4 pt-4">
+            <Button
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => processAdminPayment(adminPaymentData.clientId, adminPaymentData.plan, adminPaymentData.durationMonths)}
+              disabled={paymentLoading}
+            >
+              {paymentLoading ? (
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Processing Payment...
+                </div>
+              ) : (
+                <>
+                  <IndianRupee className="h-4 w-4 mr-2" />
+                  Process Payment via Razorpay
+                </>
+              )}
             </Button>
-            <Button variant="secondary" className="flex-1" onClick={() => setShowEditPlanModal(false)}>
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setShowAdminPaymentModal(false)}
+              disabled={paymentLoading}
+            >
               Cancel
             </Button>
           </div>

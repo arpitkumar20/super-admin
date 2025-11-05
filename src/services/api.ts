@@ -21,27 +21,42 @@ export const api = {
       console.log("Raw backend response for /client:", json);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (json.data || json || []).map((client: any) => ({
-        id: client.id,
-        name: client.full_name,
-        email: client.email,
-        phone: client.phone,
-        address: client.address,
-        notes: client.notes,
-        connector: client.connector_type ?? client.connector ?? null,
-        has_connector:
-          typeof client.has_connector === "boolean"
-            ? client.has_connector
-            : Boolean(client.has_connector),
-        documents: client.client_documents || [],
-        logo: client.logo,
-        status: client.status,
-        urls: client.url ? [client.url] : [],
-        clientRef: client.client_ref,
-        created_at: client.created_at,
-        updated_at: client.updated_at,
-        config: client.config ?? null,
-      }));
+      return (json.data || json || []).map((client: any) => {
+        const website = client.url || (client.urls && client.urls[0]) || "";
+        return {
+          id: client.id,
+          name: client.full_name,
+          email: client.email,
+          phone: client.phone,
+          address: client.address,
+          notes: client.notes,
+          connector: client.connector_type ?? client.connector ?? null,
+          has_connector:
+            typeof client.has_connector === "boolean"
+              ? client.has_connector
+              : Boolean(client.has_connector),
+          documents: client.client_documents || [],
+          logo: client.logo,
+          status: client.status || "pending",
+          urls: website ? [website] : [],
+          clientRef: client.client_ref,
+          created_at: client.created_at,
+          updated_at: client.updated_at,
+          config: client.config ?? null,
+          // Safe defaults for UI that expects these
+          company: client.company || client.full_name || client.name || "",
+          industry: client.industry || "general",
+          currentPlan: client.currentPlan || "Free",
+          subscription: (client.subscription || "basic").toLowerCase(),
+          currentUsage: Number(client.currentUsage ?? 0),
+          usageLimit: Number(client.usageLimit ?? 1000),
+          apiKey: client.apiKey || "",
+          website,
+        } as Client & {
+          created_at?: string; // retain for debug logs, not in type
+          updated_at?: string;
+        };
+      });
     } catch (err) {
       console.error("API getClients error:", err);
       throw err;
@@ -276,5 +291,70 @@ export const api = {
     }
 
     return res.json();
+  },
+
+  // Optional: Update client status (best-guess endpoint; UI is resilient if it fails)
+  updateClientStatus: async (clientId: string, status: Client["status"]): Promise<void> => {
+    try {
+      const res = await fetch(`${BASE_URL}/client/${clientId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        // Fallback: try generic update
+        const alt = await fetch(`${BASE_URL}/client/${clientId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        if (!alt.ok) {
+          const msg = await alt.text().catch(() => "Failed to update client status");
+          throw new Error(msg);
+        }
+      }
+    } catch (err) {
+      console.warn("updateClientStatus fallback (no-op):", err);
+      // Swallow to avoid UI crash; remove this if strict erroring is desired
+    }
+  },
+
+  // Generate API key (client-side fallback)
+  generateApiKey: async (): Promise<string> => {
+    // Basic random string as placeholder; replace with backend call if available
+    const rand = Math.random().toString(36).slice(2);
+    const stamp = Date.now().toString(36);
+    return `nisaa_${stamp}_${rand}`;
+  },
+
+  // Billing and Payment API methods (mock implementations)
+  getInvoices: async (): Promise<unknown[]> => {
+    // Mock implementation - replace with actual API call
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return [];
+  },
+
+  getClientSubscriptions: async (): Promise<unknown[]> => {
+    // Mock implementation - replace with actual API call
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return [];
+  },
+
+  assignPlan: async (clientId: string, plan: string): Promise<void> => {
+    // Mock implementation - replace with actual API call
+    console.log(`Assigning plan ${plan} to client ${clientId}`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  },
+
+  changePlan: async (clientId: string, plan: string): Promise<void> => {
+    // Mock implementation - replace with actual API call
+    console.log(`Changing plan to ${plan} for client ${clientId}`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  },
+
+  cancelSubscription: async (clientId: string): Promise<void> => {
+    // Mock implementation - replace with actual API call
+    console.log(`Cancelling subscription for client ${clientId}`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
   },
 };
